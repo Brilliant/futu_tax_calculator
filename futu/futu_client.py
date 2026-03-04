@@ -62,8 +62,12 @@ class FutuClient:
         self.trade_ctx = trade_ctx
         return quote_ctx, trade_ctx
     
-    def get_valid_accounts(self, trade_ctx: OpenSecTradeContext) -> pd.DataFrame:
-        """获取有效的账户列表，过滤掉模拟账户和现金账户
+    # 备注：如后续需要查看“全量账户”（含模拟/非活跃/现金），可再扩展 include_* 参数。
+    def get_valid_accounts(
+        self,
+        trade_ctx: OpenSecTradeContext,
+    ) -> pd.DataFrame:
+        """获取有效账户列表（仅保留真实且活跃账户）
         
         Args:
             trade_ctx: 交易上下文对象
@@ -77,15 +81,17 @@ class FutuClient:
         ret, acc_list_df = trade_ctx.get_acc_list()
         if ret != RET_OK or not isinstance(acc_list_df, pd.DataFrame):
             raise Exception(f'获取账户列表失败: {acc_list_df}')
-        
-        # 过滤有效账户：排除模拟账户和现金账户，排除无效acc_id
-        valid_accounts = acc_list_df[
-            (acc_list_df.get("trd_env") != TrdEnv.SIMULATE) &
-            (acc_list_df.get("acc_type") != TrdAccType.CASH) &
-            (acc_list_df['acc_id'].notna())
+
+        trd_env_col = acc_list_df.get("trd_env").astype(str).str.strip().str.upper()
+        acc_status_col = acc_list_df.get("acc_status").astype(str).str.strip().str.upper()
+
+        filtered_accounts = acc_list_df[
+            (trd_env_col == str(TrdEnv.REAL).upper())
+            & (acc_status_col == str(TrdAccStatus.ACTIVE).upper())
+            & (acc_list_df["acc_id"].notna())
         ].copy()
-        
-        return valid_accounts
+
+        return filtered_accounts
     
     def close_connections(self) -> None:
         """关闭连接"""
