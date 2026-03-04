@@ -87,7 +87,6 @@ class FutuClient:
 
         filtered_accounts = acc_list_df[
             (trd_env_col == str(TrdEnv.REAL).upper())
-            & (acc_status_col == str(TrdAccStatus.ACTIVE).upper())
             & (acc_list_df["acc_id"].notna())
         ].copy()
 
