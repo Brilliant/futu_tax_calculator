@@ -305,6 +305,58 @@ def _process_all_transactions(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(all_sales_records)
 
+def _calculate_stock_holdings_snapshot(df: pd.DataFrame) -> pd.DataFrame:
+    """计算当前股票持仓快照（份额、成本、均价）。"""
+    stock_df = df[df['资产类型'] == 'Stock'].sort_values(by='交易时间')
+    if stock_df.empty:
+        return pd.DataFrame(columns=['股票代码', '持仓份额', '持仓成本', '持仓均价', '结算币种'])
+
+    holdings_records = []
+    for code, group_df in stock_df.groupby('股票代码'):
+        quantity = 0.0
+        cost_basis = 0.0
+
+        for row in group_df.itertuples(index=False):
+            if is_buy(row):
+                quantity += row.数量
+                cost_basis += row.数量 * row.成交价格 + row.合计手续费
+            elif is_sell(row):
+                if quantity <= 0:
+                    continue
+
+                avg_cost = cost_basis / quantity
+                sold_qty = min(row.数量, quantity)
+                quantity -= sold_qty
+                cost_basis -= avg_cost * sold_qty
+
+                # 与股票卖出处理逻辑保持一致：卖超后重置为0，避免负仓
+                if row.数量 > sold_qty:
+                    quantity = 0.0
+                    cost_basis = 0.0
+
+        if quantity > 0:
+            currency = group_df['结算币种'].dropna().iloc[-1] if not group_df['结算币种'].dropna().empty else ''
+            holdings_records.append({
+                '股票代码': code,
+                '持仓份额': round(quantity, 4),
+                '持仓成本': round(cost_basis, 4),
+                '持仓均价': round(cost_basis / quantity, 4),
+                '结算币种': currency,
+            })
+
+    if not holdings_records:
+        return pd.DataFrame(columns=['股票代码', '持仓份额', '持仓成本', '持仓均价', '结算币种'])
+
+    return pd.DataFrame(holdings_records).sort_values(by='股票代码', ignore_index=True)
+
+def _print_stock_holdings_snapshot(df: pd.DataFrame) -> None:
+    """打印当前股票持仓快照。"""
+    holdings_df = _calculate_stock_holdings_snapshot(df)
+    if holdings_df.empty:
+        logger.info("当前无股票持仓。")
+        return
+    logger.info("当前股票持仓快照:\n%s", holdings_df.to_string(index=False))
+
 def _create_summary_df(yearly_df: pd.DataFrame) -> pd.DataFrame:
     """纯汇总函数：为年度数据生成按币种的汇总DataFrame。"""
     def summarize_currency(group):
@@ -377,6 +429,7 @@ def calculate_tax(input_file: str, output_dir: str):
         # 3. 分类资产
         transactions_df['资产类型'] = transactions_df['股票代码'].apply(classify_asset)
         logger.info("数据加载和预处理完成。")
+        _print_stock_holdings_snapshot(transactions_df)
 
         # 4. 计算所有交易
         all_sales_df = _process_all_transactions(transactions_df)
